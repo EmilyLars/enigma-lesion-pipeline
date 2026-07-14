@@ -1,0 +1,233 @@
+# =============================================================================
+# ENIGMA Lesion Registration Pipeline — multi-stage Apptainer build.
+#
+# Stage 1 (synthstrip): pulls the official freesurfer/synthstrip:1.6 image
+#   purely as a source to copy the mri_synthstrip binary + model weights from.
+#   We do NOT install FreeSurfer or carry that stage's filesystem forward.
+#
+# Stage 2 (final): the actual ENIGMA pipeline container. Ubuntu 22.04 base,
+#   ANTs, Python stack, plus the mri_synthstrip binary copied from stage 1.
+#
+# Hosts touched during build:
+#   - docker.io           (ubuntu base, freesurfer/synthstrip)
+#   - github.com          (ANTs release tarball; pre-existing dep)
+#   - pypi.org            (antspyx, antspynet, surfa, torch, etc)
+#   - download.pytorch.org (CPU torch wheel; required by SynthStrip)
+#   - figshare.com / s3   (ANTsXNet templates & model weights; pre-cached at
+#                          build time so runtime needs zero internet)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: SynthStrip source
+# -----------------------------------------------------------------------------
+Bootstrap: docker
+From: freesurfer/synthstrip:1.6
+Stage: synthstrip
+
+# No %post needed — we just need the filesystem layer available for %files copy.
+
+# -----------------------------------------------------------------------------
+# Stage 2: Final ENIGMA pipeline container
+# -----------------------------------------------------------------------------
+Bootstrap: docker
+From: ubuntu:22.04
+Stage: final
+
+%labels
+    Author ENIGMA Brain Injury Working Group
+    Description ENIGMA Lesion Registration Pipeline (ANTs + SynthStrip 1.6)
+
+%environment
+    export ANTSPATH=/usr/local/ants/bin
+    export PATH="${ANTSPATH}:${PATH}"
+    export PATH="/opt/enigma-lesion:${PATH}"
+    export PATH="/opt/synthstrip:${PATH}"
+    export LANG=C.UTF-8
+    # Prevent torch/numpy thread explosion in array jobs
+    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+    export MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
+    # Point ANTsPyNet at the pre-cached templates/weights baked in at build
+    # time so runtime needs no internet (no Figshare, no S3). ANTsPyNet
+    # reads Keras's cache location, which is controlled by KERAS_HOME.
+    # Setting only ANTSXNET_CACHE_DIRECTORY was insufficient in practice —
+    # antspynet defers to Keras's file-download machinery, and Keras uses
+    # KERAS_HOME.
+    export ANTSXNET_CACHE_DIRECTORY=/opt/antsxnet-cache
+    export KERAS_HOME=/opt/antsxnet-cache
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # System dependencies
+    #
+    # build-essential + python3-dev are required so that Python packages with
+    # C extensions (notably `surfa`, a SynthStrip dependency) can compile.
+    # Without them, pip falls back to building from source and fails with
+    # "x86_64-linux-gnu-gcc: No such file or directory".
+    apt-get update && apt-get install -y --no-install-recommends \
+        bc \
+        build-essential \
+        ca-certificates \
+        curl \
+        dc \
+        file \
+        git \
+        libgomp1 \
+        libopenblas-base \
+        libpng16-16 \
+        python3 \
+        python3-dev \
+        python3-pip \
+        python3-venv \
+        sqlite3 \
+        unzip \
+        wget \
+    && rm -rf /var/lib/apt/lists/*
+
+    # =========================================================================
+    # ANTs 2.5.3 (unchanged from previous build)
+    # =========================================================================
+    mkdir -p /usr/local/ants
+    wget -q -O /tmp/ants.zip \
+        https://github.com/ANTsX/ANTs/releases/download/v2.5.3/ants-2.5.3-ubuntu-22.04-X64-gcc.zip
+    unzip -q /tmp/ants.zip -d /tmp/ants_tmp
+    mv /tmp/ants_tmp/ants-2.5.3/* /usr/local/ants/
+    rm -rf /tmp/ants.zip /tmp/ants_tmp
+
+    # =========================================================================
+    # Python packages
+    # =========================================================================
+    # CPU-only torch — required for SynthStrip inference. Adds ~200 MB.
+    # If a site has GPU nodes and wants ~10x speedup, rebuild with the
+    # cu121 index URL instead.
+    pip3 install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.3.1
+
+    # surfa is SynthStrip's I/O library (light, no FreeSurfer dependency).
+    # surfa builds a C extension at install time — requires build-essential
+    # and python3-dev installed above.
+    #
+    # matplotlib is required by the Python-based QC image generator (which
+    # replaces the previous shell version that shelled out to FSL). Ships
+    # ~35 MB of wheels but eliminates the host-FSL dependency for QC.
+    pip3 install --no-cache-dir \
+        surfa \
+        antspyx \
+        antspynet \
+        nibabel \
+        pandas \
+        openpyxl \
+        matplotlib
+
+    # =========================================================================
+    # Make the mri_synthstrip binary copied from stage 1 executable
+    # =========================================================================
+    chmod 755 /opt/synthstrip/mri_synthstrip
+
+    # =========================================================================
+    # Pre-cache ANTsXNet templates and model weights
+    # =========================================================================
+    # Without this, antspynet fetches templates (ADNI, MNI) and model weights
+    # from Figshare and AWS S3 on first runtime use. That fails on air-gapped
+    # nodes and at sites with restrictive egress policies (one of the beta
+    # tester complaints we addressed).
+    #
+    # The precache script is copied into /opt/enigma-lesion/ via %files.
+    # We run it here in %post so the downloads happen during the build, and
+    # the resulting cache directory ships inside the container.
+    mkdir -p /opt/antsxnet-cache
+    export ANTSXNET_CACHE_DIRECTORY=/opt/antsxnet-cache
+    export KERAS_HOME=/opt/antsxnet-cache
+    if [ -f /opt/enigma-lesion/precache_antsxnet.py ]; then
+        python3 /opt/enigma-lesion/precache_antsxnet.py || {
+            echo "WARNING: ANTsXNet precache encountered errors."
+            echo "         The container will still work, but may need"
+            echo "         internet access at runtime for assets that"
+            echo "         didn't cache successfully."
+        }
+
+        # Keras/antspynet writes to ~/.keras/ANTsXNet/ regardless of the
+        # KERAS_HOME environment variable when they're set after import,
+        # which is the case for the precache script above. Move the assets
+        # to the intended location so runtime KERAS_HOME=/opt/antsxnet-cache
+        # (set in %environment) finds them.
+        if [ -d /root/.keras/ANTsXNet ]; then
+            echo "Moving Keras cache /root/.keras/ANTsXNet -> /opt/antsxnet-cache/ANTsXNet"
+            mkdir -p /opt/antsxnet-cache
+            mv /root/.keras/ANTsXNet /opt/antsxnet-cache/
+            # Make readable by any user at runtime, not just root
+            chmod -R a+rX /opt/antsxnet-cache
+            echo "Contents of /opt/antsxnet-cache/ANTsXNet:"
+            ls -la /opt/antsxnet-cache/ANTsXNet/ | head -20
+            echo "Total size: $(du -sh /opt/antsxnet-cache | awk '{print $1}')"
+        else
+            echo "WARNING: no cache directory found at /root/.keras/ANTsXNet"
+            echo "         Precache may have failed silently. Check the log above."
+        fi
+    else
+        echo "WARNING: /opt/enigma-lesion/precache_antsxnet.py not found."
+        echo "         Skipping ANTsXNet pre-cache. Place precache_antsxnet.py"
+        echo "         in pipeline/ before building to enable offline use."
+    fi
+
+    # =========================================================================
+    # Pipeline scripts (copied from host via %files)
+    # =========================================================================
+    ls -la /opt/enigma-lesion/
+    chmod 755 /opt/enigma-lesion/*.sh /opt/enigma-lesion/*.py || true
+
+%files from synthstrip
+    # The official SynthStrip image stores everything under /freesurfer.
+    # We pull only the binary entry point and the bundled weights.
+    /freesurfer/mri_synthstrip /opt/synthstrip/mri_synthstrip
+    /freesurfer/models /opt/synthstrip/models
+
+%files
+    # Pipeline scripts (workers, prep, QC server) AND precache_antsxnet.py.
+    # Make sure precache_antsxnet.py lives in the pipeline/ source directory
+    # next to pipeline.sh.
+    pipeline/* /opt/enigma-lesion/
+
+%runscript
+    exec /opt/enigma-lesion/pipeline.sh "$@"
+
+%help
+    ENIGMA Lesion Registration Pipeline
+
+    Includes ANTs 2.5.3, ANTsPy/ANTsPyNet (with pre-cached templates
+    and model weights), and SynthStrip 1.6 (extracted from the official
+    freesurfer/synthstrip:1.6 image).
+    FSL must be available on the host system (e.g. via module load fsl).
+
+    Build:
+        apptainer build enigma-lesion.sif enigma-lesion.def
+    Requires Apptainer/Singularity 3.6+ for multi-stage builds.
+
+    Run (FSL from host via --bind):
+        module load fsl
+        apptainer run --bind /path/to/data:/data,/path/to/templates:/templates \
+            enigma-lesion.sif --step all --scheduler slurm /data /templates
+
+    Choosing a brain extraction method:
+        --extract-method ants        (default; NKI age-appropriate templates)
+        --extract-method synthstrip  (lesion-tolerant deep-learning)
+        --extract-mask DIR           (use pre-supplied masks for some/all subjects)
+
+    Reprocessing failures:
+        --rerun-failed   only run subjects without any .done marker
+        --list-failed    print the rerun list without submitting
+
+    Memory and timing notes:
+        - SynthStrip CPU inference: 1-2 min/subject, peaks at ~4-6 GB RAM.
+        - SynthStrip GPU inference: ~10 s/subject (if CUDA is available).
+        - ANTs antsBrainExtraction.sh: 10-30 min/subject, peaks ~6-10 GB RAM.
+        - Default --mem 16G is plenty for both methods.
+        - Sites running large SynthStrip-only batches can safely drop to --mem 8G.
+        - Sites without GPU nodes: SynthStrip CPU still beats ANTs wall-time
+          per subject.
+
+    Offline / air-gapped runtime:
+        - ANTsXNet templates and weights are pre-cached at /opt/antsxnet-cache
+        - SynthStrip model weights are bundled at /opt/synthstrip/models
+        - No outbound internet is required to process subjects.

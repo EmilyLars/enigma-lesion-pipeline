@@ -1,0 +1,35 @@
+# Container binary (too big for git; distribute via Zenodo instead)
+*.sif
+*.simg
+
+# Build artifacts
+*.o
+*.a
+*.so
+build/
+sandbox/
+
+# Local scratch
+scratch/
+tmp/
+*.local.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+build.log
+logs/

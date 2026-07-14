@@ -1,0 +1,59 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install linters
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff shellcheck-py
+
+      - name: Ruff (Python)
+        run: ruff check pipeline/ precache_antsxnet.py
+
+      - name: Shellcheck (bash)
+        run: |
+          shellcheck --severity=warning pipeline/*.sh || true
+          # Non-fatal for now — the pipeline scripts have some deliberate
+          # sourcing patterns that shellcheck flags. Report but don't fail.
+
+      - name: Def-file sanity check
+        run: |
+          # Verify the .def file is well-formed: expected sections present,
+          # no obvious typos in stage names.
+          for section in "Bootstrap:" "%post" "%environment" "%runscript" "%help"; do
+              if ! grep -q "$section" enigma-lesion.def; then
+                  echo "ERROR: enigma-lesion.def missing $section"
+                  exit 1
+              fi
+          done
+          echo "enigma-lesion.def structure OK"
+
+  python-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile-check every .py file
+        run: |
+          python -m py_compile pipeline/*.py precache_antsxnet.py
+          echo "All Python files parse cleanly"
