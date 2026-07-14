@@ -61,13 +61,15 @@ one subject (useful for spot-checking).
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import warnings
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Optional, Sequence, Tuple
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import nibabel
 
 # nibabel and matplotlib are imported lazily inside the entry function so that
 # `--help` still works even if one of them is unavailable, which makes

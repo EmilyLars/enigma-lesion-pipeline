@@ -16,7 +16,6 @@ Then SSH tunnel:
 """
 
 import os
-import sys
 import json
 import shutil
 import hashlib
@@ -884,11 +883,11 @@ def migrate_legacy_db(qc_dir: Path, new_db: Path) -> None:
     new_db.parent.mkdir(parents=True, exist_ok=True)
     try:
         shutil.copy2(str(legacy), str(new_db))
-        print(f"  Migrated legacy QC database:")
+        print("  Migrated legacy QC database:")
         print(f"    from: {legacy}")
         print(f"      to: {new_db}")
-        print(f"    (legacy file kept in place; you can delete it once you've")
-        print(f"     verified your QC ratings are intact)")
+        print("    (legacy file kept in place; you can delete it once you've")
+        print("     verified your QC ratings are intact)")
     except (OSError, shutil.Error) as e:
         print(f"  WARNING: could not migrate legacy DB ({e}); starting fresh.")
 
