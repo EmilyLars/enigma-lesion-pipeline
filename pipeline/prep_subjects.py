@@ -181,7 +181,7 @@ def main():
             f.write(f"{sub_id}\t{age}\n")
     
     print(f"Done! Created {args.output} with {len(matched)} subjects")
-    print(f"\nTo submit jobs:")
+    print("\nTo submit jobs:")
     print(f"  qsub -t 1-{len(matched)} run_brain_extraction.sh")
 
 

@@ -1,22 +1,25 @@
 #!/usr/bin/env python
-import sys; print("Script starting...", flush=True)
 """
 Label-based registration for images with lesions using ANTsPyNet
 
-This script registers T1 images with lesions to a template using 
-label-based registration, where the lesion mask is included as an 
+This script registers T1 images with lesions to a template using
+label-based registration, where the lesion mask is included as an
 additional label to help the registration handle lesion regions appropriately.
 """
 
-import os
-import sys
 import argparse
+import os
 import shutil
-import ants
+import sys
+
+# Early diagnostic: on some HPC systems ants/antspynet imports take
+# 30+ seconds. These prints help distinguish "script hung" from "slow imports".
+print("Script starting...", flush=True)
+
+import ants  # noqa: E402
 print("ants imported", flush=True)
-import antspynet
+import antspynet  # noqa: E402
 print("antspynet imported", flush=True)
-print("ants imported", flush=True)
 
 
 def register_with_lesion(t1_path, lesion_path, output_dir, template_path=None, 
