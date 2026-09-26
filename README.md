@@ -1,4 +1,5 @@
 # ENIGMA Lesion Registration Pipeline
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21367600.svg)](https://doi.org/10.5281/zenodo.21367600)
 
 A containerized pipeline for brain extraction, lesion-masked registration, and quality control for the ENIGMA Brain Injury working group.
 
@@ -32,7 +33,7 @@ Requires Apptainer 1.0+ or Singularity 3.6+ on your HPC system. FSL is no longer
 
 ```bash
 # Get the container
-wget https://[TODO: Zenodo link]/enigma-lesion.sif
+wget https://zenodo.org/records/21367600/files/enigma-lesion.sif
 
 # Get the brain extraction templates (only needed for --extract-method ants)
 # See docs/INSTALLATION.md for download links and directory structure
@@ -86,7 +87,7 @@ Because the container binary is 2.5 GB, it isn't stored in this repository. Rele
 
 | Version | Date | DOI | Notes |
 |---------|------|-----|-------|
-| 2.0.0   | TBD  | TBD | Python QC (no host FSL), SynthStrip, offline templates |
+| 2.0.0   | 2026-07-15 | [10.5281/zenodo.21367600](https://doi.org/10.5281/zenodo.21367600) | Python QC (no host FSL), SynthStrip, offline templates |
 
 ## Citation
 
